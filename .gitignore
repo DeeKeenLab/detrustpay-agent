@@ -16,7 +16,7 @@ Thumbs.db
 **/keys/*.json
 **/wallets/
 **/*keypair*.json
-**/deploy/*.json
+**/target/deploy/*.json
 *.pem
 *.key
 
@@ -40,6 +40,10 @@ build/
 coverage/
 **/coverage/
 *.tsbuildinfo
+.pnpm-store/
+**/.pnpm-store/
+.turbo/
+**/.turbo/
 
 # Rust, Anchor, and Solana
 target/

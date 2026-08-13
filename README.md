@@ -13,7 +13,7 @@ or an agreed adjustment.
 This repository begins as a pre-Eternal baseline on August 13, 2026.
 
 - Network: Solana devnet only for the Eternal sprint.
-- Program: existing DeTrustPay Anchor program snapshot.
+- Program: pinned snapshot of the canonical DeTrustPay Anchor program.
 - External usage: no meaningful real-user usage yet.
 - Agent interface: not implemented at baseline.
 - Security: no published third-party audit; use devnet test assets only.
@@ -39,7 +39,7 @@ on-chain settlement consequences.
 ## Repository map
 
 ```text
-program/                  Anchor program snapshot and deployed IDL
+program/                  Pinned canonical program snapshot and deployed IDL
 packages/sdk/             Agent-oriented TypeScript SDK
 apps/mcp-server/          MCP reference interface
 apps/task-explorer/       Read-only lifecycle explorer
@@ -49,7 +49,9 @@ tests/                    Agent lifecycle integration tests
 docs/eternal/             Baseline, weekly evidence, metrics, and submission docs
 ```
 
-Only the `program/` baseline is implemented at repository creation. The agent
+Only the `program/` baseline is implemented at repository creation. It is a
+read-only integration snapshot; protocol changes are made in the platform
+repository and imported here in explicit synchronization commits. The agent
 components deliberately start as documented work areas so Eternal progress is
 visible in Git history.
 
@@ -71,13 +73,13 @@ The deployed devnet program ID is:
 
 ## Repository provenance
 
-The legacy product monorepo remains at
-`JerryRenCA/TrustPay`. This repository is a clean, competition-focused source
-baseline intended for `DeeKeenLab/detrustpay-agent`; it is not a mirror of the
-legacy Git history.
+The canonical product and protocol monorepo remains at `JerryRenCA/TrustPay`.
+This repository is a clean, competition-focused integration baseline intended
+for `DeeKeenLab/detrustpay-agent`; it is not a mirror of the platform history.
 
-See [repository boundaries](docs/repository-boundaries.md) for what belongs in
-each repository.
+See [program provenance](program/UPSTREAM.md) for the pinned source hashes and
+[repository boundaries](docs/repository-boundaries.md) for what belongs in each
+repository.
 
 ## License
 
