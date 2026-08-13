@@ -1,0 +1,65 @@
+# Operating systems and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+!.env.sample
+.secrets/
+**/.secrets/
+**/keys/*.json
+**/wallets/
+**/*keypair*.json
+**/deploy/*.json
+*.pem
+*.key
+
+# Logs and temporary files
+*.log
+*.tmp
+tmp/
+.cache/
+
+# JavaScript and TypeScript
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+out/
+**/out/
+dist/
+**/dist/
+build/
+**/build/
+coverage/
+**/coverage/
+*.tsbuildinfo
+
+# Rust, Anchor, and Solana
+target/
+**/target/
+.anchor/
+**/.anchor/
+test-ledger/
+**/test-ledger/
+
+# .NET
+**/bin/
+**/obj/
+**/.vs/
+TestResults/
+artifacts/
+
+# Infrastructure output
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+**/terraform.tfvars
+!**/terraform.tfvars.example
