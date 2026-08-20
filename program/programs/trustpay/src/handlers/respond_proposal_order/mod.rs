@@ -8,7 +8,7 @@ pub use payee_accept_proposal_token_order::*;
 pub mod payer_accept_proposal_token_order;
 pub use payer_accept_proposal_token_order::*;
 
-fn ensure_payee_can_respond<'info>(order_account: &Account<'info, Order>, id: &str) -> Result<()> {
+fn ensure_payee_can_respond(order_account: &Order, id: &str) -> Result<()> {
     require!(!order_account.closed, CustomError::ClosedError);
 
     require!(order_account.id == id, CustomError::PaymentIdMismatch);
@@ -23,8 +23,8 @@ fn ensure_payee_can_respond<'info>(order_account: &Account<'info, Order>, id: &s
     Ok(())
 }
 
-fn apply_payee_response<'info>(
-    order_account: &mut Account<'info, Order>,
+fn apply_payee_response(
+    order_account: &mut Order,
     id: &str,
     payment_key: Pubkey,
     responder: Pubkey,
@@ -54,7 +54,7 @@ fn apply_payee_response<'info>(
     Ok(())
 }
 
-fn ensure_payer_can_respond<'info>(order_account: &Account<'info, Order>, id: &str) -> Result<()> {
+fn ensure_payer_can_respond(order_account: &Order, id: &str) -> Result<()> {
     require!(!order_account.closed, CustomError::ClosedError);
 
     require!(order_account.id == id, CustomError::PaymentIdMismatch);
@@ -69,8 +69,8 @@ fn ensure_payer_can_respond<'info>(order_account: &Account<'info, Order>, id: &s
     Ok(())
 }
 
-fn apply_payer_response<'info>(
-    order_account: &mut Account<'info, Order>,
+fn apply_payer_response(
+    order_account: &mut Order,
     id: &str,
     payment_key: Pubkey,
     responder: Pubkey,

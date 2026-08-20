@@ -1,6 +1,6 @@
 # Repository Boundaries
 
-## Canonical repository: `JerryRenCA/TrustPay`
+## Canonical repository: `JerryRenCA/TrustPay-v1`
 
 The platform repository owns:
 

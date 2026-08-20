@@ -2,6 +2,10 @@ Public Source Availability Notice
 
 Copyright (c) 2026 DeTrustPay contributors.
 
+Exception: files under packages/sdk/ are licensed under the Apache License,
+Version 2.0, as stated in packages/sdk/LICENSE. That directory-specific license
+controls if it conflicts with this repository-level notice.
+
 This repository is made publicly available only to support source-code review,
 audit, and Solana program verification for the DeTrustPay program.
 

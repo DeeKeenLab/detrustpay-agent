@@ -1,119 +1,89 @@
 use anchor_lang::prelude::*;
-use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token_interface::{
-    close_account, transfer_checked, CloseAccount, Mint, TokenAccount, TokenInterface,
-    TransferChecked,
+    transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
 
-use crate::constants::{SEED_CONFIG_ACCOUNT, SEED_LISTING_ACCOUNT, SEED_ORDER_ACCOUNT};
+use crate::constants::{
+    SEED_BUYER_ORDER_COPY, SEED_CONFIG_ACCOUNT, SEED_LISTING_ACCOUNT, SEED_ORDER_AUTHORITY,
+    SEED_ORDER_TOKEN_VAULT_ACCOUNT, SEED_PARTY_ORDER_ACCOUNT, SEED_PROTOCOL_FEE_VAULT_ACCOUNT,
+    SEED_SELLER_ORDER_COPY,
+};
 use crate::error::CustomError;
-use crate::state::{require_fee_vault_account, Config, Listing, Order, OrderClosedReason};
+use crate::state::{
+    sync_order_pair, validate_order_pair, Config, Listing, OrderClosedReason, PartyOrder,
+};
 use crate::{calc_payee_cancel_fee, OrderCancelled, PayeeCancelFee};
 
 pub fn process_payee_cancel_token_order(
     ctx: Context<PayeeCancelTokenOrder>,
     id: String,
 ) -> Result<()> {
-    let config = &ctx.accounts.config_account;
-    require_fee_vault_account(config, &ctx.accounts.fee_vault_account.to_account_info())?;
-
-    require!(!ctx.accounts.order_account.closed, CustomError::ClosedError);
-
-    require!(
-        ctx.accounts.order_account.id == id,
-        CustomError::PaymentIdMismatch
+    validate_order_pair(
+        &ctx.accounts.buyer_order_account,
+        &ctx.accounts.seller_order_account,
+    )?;
+    let order = &ctx.accounts.buyer_order_account.order;
+    require_keys_eq!(
+        order.payer,
+        ctx.accounts.payer.key(),
+        CustomError::OrderAuthorityMismatch
     );
     require_keys_eq!(
-        ctx.accounts.order_account.order_token_vault_account,
+        order.payee,
+        ctx.accounts.payee.key(),
+        CustomError::OrderAuthorityMismatch
+    );
+    require!(!order.closed, CustomError::ClosedError);
+    require!(order.id == id, CustomError::PaymentIdMismatch);
+    require_keys_eq!(
+        order.order_token_vault_account,
         ctx.accounts.order_token_vault_account.key(),
         CustomError::TokenVaultMismatch
     );
     require_keys_eq!(
-        ctx.accounts.order_account.mint_account,
+        order.mint_account,
         ctx.accounts.mint_account.key(),
         CustomError::MintAccountMismatch
     );
     require_keys_eq!(
-        ctx.accounts.order_account.payer_token_account,
+        order.payer_token_account,
         ctx.accounts.payer_token_account.key(),
         CustomError::TokenAccountMismatch
     );
     require_keys_eq!(
-        ctx.accounts.order_account.payee_token_account,
+        order.payee_token_account,
         ctx.accounts.payee_token_account.key(),
         CustomError::TokenAccountMismatch
     );
     require_keys_eq!(
-        ctx.accounts.order_account.creator,
-        ctx.accounts.payment_creator.key(),
-        CustomError::PaymentOnlyCreator
+        order.parent_listing,
+        ctx.accounts.listing.key(),
+        CustomError::SetupAccountMismatch
     );
 
-    let clock = Clock::get()?;
-    let timestamp = clock.unix_timestamp;
-    let accepted_at = ctx.accounts.order_account.date_accepted;
+    let timestamp = Clock::get()?.unix_timestamp;
     let PayeeCancelFee {
         fee_amount: raw_fee,
         ..
-    } = calc_payee_cancel_fee(
-        ctx.accounts.order_account.payment_amount,
-        accepted_at,
-        timestamp,
-    )?;
-
-    require!(
-        ctx.accounts.order_account.parent_listing != Pubkey::default(),
-        CustomError::MissingSetupAccount
-    );
-
-    let instance_index_bytes = ctx.accounts.order_account.instance_index.to_le_bytes();
-    let payment_seeds = [
-        SEED_ORDER_ACCOUNT,
-        ctx.accounts.order_account.listing_id.as_ref(),
-        instance_index_bytes.as_ref(),
-        &[ctx.accounts.order_account.bump],
-    ];
-    let signer_seeds: &[&[&[u8]]] = &[&payment_seeds];
-
-    let payer_refund = ctx
-        .accounts
-        .order_account
+    } = calc_payee_cancel_fee(order.payment_amount, order.date_accepted, timestamp)?;
+    let payer_refund = order
         .payer_deposit_amount
-        .checked_add(ctx.accounts.order_account.payment_amount)
+        .checked_add(order.payment_amount)
         .ok_or(CustomError::AmountOverflow)?;
-    let fee_payee = raw_fee.min(ctx.accounts.order_account.payee_deposit_amount);
-    let payee_refund = ctx
-        .accounts
-        .order_account
+    let fee_payee = raw_fee.min(order.payee_deposit_amount);
+    let payee_refund = order
         .payee_deposit_amount
         .checked_sub(fee_payee)
         .ok_or(CustomError::AmountUnderflow)?;
 
-    let setup = &ctx.accounts.listing;
-    require_keys_eq!(
-        setup.key(),
-        ctx.accounts.order_account.parent_listing,
-        CustomError::SetupAccountMismatch
-    );
-    require_keys_eq!(
-        setup.listing_token_vault_account,
-        ctx.accounts.listing_token_vault_account.key(),
-        CustomError::SetupTokenVaultMismatch
-    );
-    require!(
-        setup.mint_account == ctx.accounts.mint_account.key(),
-        CustomError::SetupMintMismatch
-    );
-    require_keys_eq!(
-        setup.creator,
-        ctx.accounts.setup_creator.key(),
-        CustomError::SetupAccountMismatch
-    );
-
-    let payer_token_info = ctx.accounts.payer_token_account.to_account_info();
-    let payee_token_info = ctx.accounts.payee_token_account.to_account_info();
-    let payer_destination = payer_token_info.clone();
-    let payee_destination = payee_token_info.clone();
+    let instance_index_bytes = order.instance_index.to_le_bytes();
+    let authority_seeds = [
+        SEED_ORDER_AUTHORITY,
+        order.parent_listing.as_ref(),
+        instance_index_bytes.as_ref(),
+        &[order.bump],
+    ];
+    let signer_seeds: &[&[&[u8]]] = &[&authority_seeds];
 
     transfer_checked(
         CpiContext::new_with_signer(
@@ -121,30 +91,28 @@ pub fn process_payee_cancel_token_order(
             TransferChecked {
                 from: ctx.accounts.order_token_vault_account.to_account_info(),
                 mint: ctx.accounts.mint_account.to_account_info(),
-                to: payer_destination,
-                authority: ctx.accounts.order_account.to_account_info(),
+                to: ctx.accounts.payer_token_account.to_account_info(),
+                authority: ctx.accounts.order_authority.to_account_info(),
             },
             signer_seeds,
         ),
         payer_refund,
         ctx.accounts.mint_account.decimals,
     )?;
-
     transfer_checked(
         CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
             TransferChecked {
                 from: ctx.accounts.order_token_vault_account.to_account_info(),
                 mint: ctx.accounts.mint_account.to_account_info(),
-                to: payee_destination,
-                authority: ctx.accounts.order_account.to_account_info(),
+                to: ctx.accounts.payee_token_account.to_account_info(),
+                authority: ctx.accounts.order_authority.to_account_info(),
             },
             signer_seeds,
         ),
         payee_refund,
         ctx.accounts.mint_account.decimals,
     )?;
-
     if fee_payee > 0 {
         transfer_checked(
             CpiContext::new_with_signer(
@@ -152,8 +120,8 @@ pub fn process_payee_cancel_token_order(
                 TransferChecked {
                     from: ctx.accounts.order_token_vault_account.to_account_info(),
                     mint: ctx.accounts.mint_account.to_account_info(),
-                    to: ctx.accounts.vault_token_account.to_account_info(),
-                    authority: ctx.accounts.order_account.to_account_info(),
+                    to: ctx.accounts.protocol_fee_vault.to_account_info(),
+                    authority: ctx.accounts.order_authority.to_account_info(),
                 },
                 signer_seeds,
             ),
@@ -162,40 +130,36 @@ pub fn process_payee_cancel_token_order(
         )?;
     }
 
-    let close_destination = ctx.accounts.payment_creator.to_account_info();
-
-    close_account(CpiContext::new_with_signer(
-        ctx.accounts.token_program.to_account_info(),
-        CloseAccount {
-            account: ctx.accounts.order_token_vault_account.to_account_info(),
-            destination: close_destination,
-            authority: ctx.accounts.order_account.to_account_info(),
-        },
-        signer_seeds,
-    ))?;
-
-    // ctx.accounts.listing.used_capacity = ctx
-    //     .accounts
-    //     .listing
-    //     .used_capacity
-    //     .checked_sub(1)
-    //     .ok_or(CustomError::AmountUnderflow)?;
-
     ctx.accounts.listing.active_orders = ctx
         .accounts
         .listing
         .active_orders
         .checked_sub(1)
         .ok_or(CustomError::AmountUnderflow)?;
+    ctx.accounts.listing.revision = ctx
+        .accounts
+        .listing
+        .revision
+        .checked_add(1)
+        .ok_or(CustomError::AmountOverflow)?;
 
-    ctx.accounts.order_account.closed = true;
-    ctx.accounts.order_account.closed_date = timestamp;
-    ctx.accounts.order_account.closed_reason = OrderClosedReason::Cancelled;
+    let order = &mut ctx.accounts.buyer_order_account.order;
+    order.closed = true;
+    order.closed_date = timestamp;
+    order.closed_reason = OrderClosedReason::Cancelled;
+    order.version = order
+        .version
+        .checked_add(1)
+        .ok_or(CustomError::AmountOverflow)?;
+    sync_order_pair(
+        &mut ctx.accounts.buyer_order_account,
+        &mut ctx.accounts.seller_order_account,
+    )?;
 
     emit!(OrderCancelled {
         creator: ctx.accounts.payee.key(),
-        id: ctx.accounts.order_account.id.clone(),
-        payment: ctx.accounts.order_account.key(),
+        id,
+        payment: ctx.accounts.buyer_order_account.key(),
         payer: ctx.accounts.payer.key(),
         payee: ctx.accounts.payee.key(),
         vault: ctx.accounts.order_token_vault_account.key(),
@@ -207,13 +171,12 @@ pub fn process_payee_cancel_token_order(
         refund_to_payer: payer_refund,
         refund_to_payee: payee_refund,
         drained_to_payer: 0,
-        drained_to_payee: 0
+        drained_to_payee: 0,
     });
     Ok(())
 }
 
 #[derive(Accounts)]
-#[instruction(id: String)] // id order is matter!!!
 pub struct PayeeCancelTokenOrder<'info> {
     #[account(mut)]
     pub payee: Signer<'info>,
@@ -221,72 +184,61 @@ pub struct PayeeCancelTokenOrder<'info> {
     #[account(mut)]
     pub payer: SystemAccount<'info>,
 
-    #[account(mut)]
-    pub payment_creator: SystemAccount<'info>,
+    #[account(
+        mut,
+        seeds = [SEED_PARTY_ORDER_ACCOUNT, buyer_order_account.parent_listing.as_ref(), buyer_order_account.instance_index.to_le_bytes().as_ref(), SEED_BUYER_ORDER_COPY],
+        bump = buyer_order_account.bump,
+    )]
+    pub buyer_order_account: Box<Account<'info, PartyOrder>>,
 
     #[account(
         mut,
-        close = payment_creator,
-        has_one = order_token_vault_account,
-        has_one = mint_account,
-        has_one = payer,
-        has_one = payee,
-        has_one = payer_token_account,
-        has_one = payee_token_account,
-        seeds = [
-            SEED_ORDER_ACCOUNT,
-            order_account.listing_id.as_ref(),
-            order_account.instance_index.to_le_bytes().as_ref(),
-        ],
-        bump = order_account.bump,
+        seeds = [SEED_PARTY_ORDER_ACCOUNT, seller_order_account.parent_listing.as_ref(), seller_order_account.instance_index.to_le_bytes().as_ref(), SEED_SELLER_ORDER_COPY],
+        bump = seller_order_account.bump,
     )]
-    pub order_account: Box<Account<'info, Order>>,
+    pub seller_order_account: Box<Account<'info, PartyOrder>>,
 
-    #[account(mut)]
+    /// CHECK: Accountless PDA constrained by shared order identity.
+    #[account(
+        seeds = [SEED_ORDER_AUTHORITY, buyer_order_account.parent_listing.as_ref(), buyer_order_account.instance_index.to_le_bytes().as_ref()],
+        bump = buyer_order_account.order.bump,
+    )]
+    pub order_authority: UncheckedAccount<'info>,
+
+    #[account(
+        mut,
+        seeds = [SEED_ORDER_TOKEN_VAULT_ACCOUNT, buyer_order_account.parent_listing.as_ref(), buyer_order_account.instance_index.to_le_bytes().as_ref()],
+        bump = buyer_order_account.bump_order_token_vault_account,
+    )]
     pub order_token_vault_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(mut)]
-    /// CHECK: Account key is verified against the payment and only used as a CPI target.
+    /// CHECK: Key is checked against shared order state.
     pub payer_token_account: UncheckedAccount<'info>,
 
     #[account(mut)]
-    /// CHECK: Account key is verified against the payment and only used as a CPI target.
+    /// CHECK: Key is checked against shared order state.
     pub payee_token_account: UncheckedAccount<'info>,
 
     #[account(
         init_if_needed,
         payer = payee,
-        associated_token::mint = mint_account,
-        associated_token::authority = fee_vault_account,
-        associated_token::token_program = token_program,
+        seeds = [SEED_PROTOCOL_FEE_VAULT_ACCOUNT, mint_account.key().as_ref()],
+        bump,
+        token::mint = mint_account,
+        token::authority = config_account,
+        token::token_program = token_program,
     )]
-    pub vault_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub protocol_fee_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     pub mint_account: Box<InterfaceAccount<'info, Mint>>,
 
-    #[account(
-        seeds = [SEED_CONFIG_ACCOUNT],
-        bump = config_account.bump,
-    )]
+    #[account(seeds = [SEED_CONFIG_ACCOUNT], bump = config_account.bump)]
     pub config_account: Account<'info, Config>,
 
-    /// CHECK: Account is validated against config in instruction logic.
-    pub fee_vault_account: UncheckedAccount<'info>,
-
-    #[account(
-        mut,
-        seeds = [SEED_LISTING_ACCOUNT, order_account.listing_id.as_ref()],
-        bump = listing.bump,
-    )]
+    #[account(mut, seeds = [SEED_LISTING_ACCOUNT, listing.id.as_ref()], bump = listing.bump)]
     pub listing: Account<'info, Listing>,
 
-    #[account(mut)]
-    pub listing_token_vault_account: Box<InterfaceAccount<'info, TokenAccount>>,
-
-    #[account(mut)]
-    pub setup_creator: SystemAccount<'info>,
-
     pub token_program: Interface<'info, TokenInterface>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }

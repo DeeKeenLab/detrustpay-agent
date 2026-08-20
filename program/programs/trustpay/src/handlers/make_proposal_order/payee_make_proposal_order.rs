@@ -1,11 +1,12 @@
-use crate::constants::{MAX_MESSAGE_LENGTH, SEED_CONFIG_ACCOUNT, SEED_ORDER_ACCOUNT};
-use crate::error::CustomError;
-use crate::handlers::helpers::{add_proposal_penalty_bps, resolve_proposal_penalty_bps};
-use crate::{
-    state::{Config, Order},
-    OrderProposal,
-};
 use anchor_lang::prelude::*;
+
+use crate::constants::{
+    MAX_MESSAGE_LENGTH, SEED_BUYER_ORDER_COPY, SEED_PARTY_ORDER_ACCOUNT, SEED_SELLER_ORDER_COPY,
+};
+use crate::error::CustomError;
+use crate::handlers::helpers::{add_proposal_penalty_bps, resolve_order_proposal_penalty_bps};
+use crate::state::{sync_order_pair, validate_order_pair, PartyOrder};
+use crate::OrderProposal;
 
 pub fn process_payee_make_proposal_order(
     ctx: Context<PayeeMakeProposalOrder>,
@@ -17,14 +18,25 @@ pub fn process_payee_make_proposal_order(
     ephemeral_pubkey: Option<Pubkey>,
     nonce: Option<[u8; 12]>,
 ) -> Result<()> {
-    require!(!ctx.accounts.order_account.closed, CustomError::ClosedError);
-
+    validate_order_pair(
+        &ctx.accounts.buyer_order_account,
+        &ctx.accounts.seller_order_account,
+    )?;
+    require_keys_eq!(
+        ctx.accounts.seller_order_account.authority,
+        ctx.accounts.payee.key(),
+        CustomError::OrderAuthorityMismatch
+    );
     require!(
-        ctx.accounts.order_account.id == id,
+        !ctx.accounts.buyer_order_account.closed,
+        CustomError::ClosedError
+    );
+    require!(
+        ctx.accounts.buyer_order_account.id == id,
         CustomError::PaymentIdMismatch
     );
     require!(
-        counter_amount <= ctx.accounts.order_account.payment_amount,
+        counter_amount <= ctx.accounts.buyer_order_account.payment_amount,
         CustomError::CounterAmountTooHigh
     );
     let clock = Clock::get()?;
@@ -34,70 +46,81 @@ pub fn process_payee_make_proposal_order(
             CustomError::ProposalExpiryInvalid
         );
     }
-    let proposal_penalty_bps =
-        resolve_proposal_penalty_bps(ctx.accounts.config_account.enable_dispute_deterrent)?;
+    let proposal_penalty_bps = resolve_order_proposal_penalty_bps(
+        ctx.accounts.buyer_order_account.is_adjustable_payment,
+        ctx.accounts.buyer_order_account.dispute_deterrent_enabled,
+    )?;
 
-    ctx.accounts.order_account.payee_made_proposal_amount = counter_amount;
-    ctx.accounts.order_account.payee_made_proposal_expiry = proposal_expiry;
-    ctx.accounts.order_account.version += 1;
-    ctx.accounts.order_account.additional_fee_payee_bps = add_proposal_penalty_bps(
-        ctx.accounts.order_account.additional_fee_payee_bps,
-        proposal_penalty_bps,
-    );
-    ctx.accounts.order_account.additional_fee_payer_bps = add_proposal_penalty_bps(
-        ctx.accounts.order_account.additional_fee_payer_bps,
-        proposal_penalty_bps,
-    );
-    ctx.accounts.order_account.payee_made_proposal_date = clock.unix_timestamp;
+    let order = &mut ctx.accounts.buyer_order_account.order;
+    order.payee_made_proposal_amount = counter_amount;
+    order.payee_made_proposal_expiry = proposal_expiry;
+    order.version = order
+        .version
+        .checked_add(1)
+        .ok_or(CustomError::AmountOverflow)?;
+    order.additional_fee_payee_bps =
+        add_proposal_penalty_bps(order.additional_fee_payee_bps, proposal_penalty_bps);
+    order.additional_fee_payer_bps =
+        add_proposal_penalty_bps(order.additional_fee_payer_bps, proposal_penalty_bps);
+    order.payee_made_proposal_date = clock.unix_timestamp;
 
     if let Some(message_value) = message {
         require!(
             message_value.len() <= MAX_MESSAGE_LENGTH,
             CustomError::MessageTooLong
         );
-        ctx.accounts.order_account.payee_message = message_value;
-        ctx.accounts.order_account.payee_message_is_encrypted = is_encrypted.unwrap_or(false);
-        ctx.accounts.order_account.payee_message_nonce = nonce.unwrap_or([0u8; 12]);
-        ctx.accounts.order_account.payee_message_date = clock.unix_timestamp;
+        order.payee_message = message_value;
+        order.payee_message_is_encrypted = is_encrypted.unwrap_or(false);
+        order.payee_message_nonce = nonce.unwrap_or([0u8; 12]);
+        order.payee_message_date = clock.unix_timestamp;
         let message_ephemeral = ephemeral_pubkey.unwrap_or_default();
         if message_ephemeral != Pubkey::default() {
-            ctx.accounts.order_account.payee_ephemeral_pubkey = message_ephemeral;
+            order.payee_ephemeral_pubkey = message_ephemeral;
         }
     }
 
+    sync_order_pair(
+        &mut ctx.accounts.buyer_order_account,
+        &mut ctx.accounts.seller_order_account,
+    )?;
     emit!(OrderProposal {
         creator: ctx.accounts.payee.key(),
-        id: ctx.accounts.order_account.id.clone(),
-        payment: ctx.accounts.order_account.key(),
-        payer: ctx.accounts.order_account.payer,
-        payee: ctx.accounts.order_account.payee,
+        id: ctx.accounts.buyer_order_account.id.clone(),
+        payment: ctx.accounts.buyer_order_account.key(),
+        payer: ctx.accounts.buyer_order_account.payer,
+        payee: ctx.accounts.buyer_order_account.payee,
         counter_amount,
-        version: ctx.accounts.order_account.version,
+        version: ctx.accounts.buyer_order_account.version,
     });
     Ok(())
 }
 
 #[derive(Accounts)]
-#[instruction(id: String)]
 pub struct PayeeMakeProposalOrder<'info> {
     #[account(mut)]
     pub payee: Signer<'info>,
 
     #[account(
-        seeds = [SEED_CONFIG_ACCOUNT],
-        bump = config_account.bump,
+        mut,
+        seeds = [
+            SEED_PARTY_ORDER_ACCOUNT,
+            buyer_order_account.parent_listing.as_ref(),
+            buyer_order_account.instance_index.to_le_bytes().as_ref(),
+            SEED_BUYER_ORDER_COPY,
+        ],
+        bump = buyer_order_account.bump,
     )]
-    pub config_account: Account<'info, Config>,
+    pub buyer_order_account: Box<Account<'info, PartyOrder>>,
 
     #[account(
         mut,
-        has_one = payee,
         seeds = [
-            SEED_ORDER_ACCOUNT,
-            order_account.listing_id.as_ref(),
-            order_account.instance_index.to_le_bytes().as_ref(),
+            SEED_PARTY_ORDER_ACCOUNT,
+            seller_order_account.parent_listing.as_ref(),
+            seller_order_account.instance_index.to_le_bytes().as_ref(),
+            SEED_SELLER_ORDER_COPY,
         ],
-        bump = order_account.bump,
+        bump = seller_order_account.bump,
     )]
-    pub order_account: Account<'info, Order>,
+    pub seller_order_account: Box<Account<'info, PartyOrder>>,
 }

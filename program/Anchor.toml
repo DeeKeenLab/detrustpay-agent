@@ -5,11 +5,24 @@ package_manager = "yarn"
 resolution = true
 skip-lint = false
 
+[programs.localnet]
+detrustpay = "3S3kY64L8a3torKLpqEzkQeqDX82wjKRFXDMvxq2KcnL"
+
 [programs.devnet]
-detrustpay = "3QE69X6FsKxaop5osBW1WL11cCTMMvDuXJLZ9s2TcCNy"
+detrustpay = "3S3kY64L8a3torKLpqEzkQeqDX82wjKRFXDMvxq2KcnL"
 
 [registry]
 url = "https://api.apr.dev"
+
+[scripts]
+test = "yarn run mocha --timeout 120000 tests/dual-order-pda.js"
+
+[test]
+startup_wait = 10000
+upgradeable = true
+
+[test.validator]
+bind_address = "127.0.0.1"
 
 [provider]
 cluster = "https://api.devnet.solana.com"

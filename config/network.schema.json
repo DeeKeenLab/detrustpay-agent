@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://detrustpay.dev/schemas/network-v1.json",
+  "title": "DeTrustPay Agent Network Configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "cluster",
+    "rpcUrl",
+    "programId",
+    "configAccount",
+    "settlementToken",
+    "limits",
+    "lastVerifiedAt"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "cluster": { "const": "devnet" },
+    "rpcUrl": { "type": "string", "format": "uri" },
+    "programId": { "$ref": "#/$defs/solanaAddress" },
+    "configAccount": { "$ref": "#/$defs/solanaAddress" },
+    "settlementToken": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbol", "mint", "decimals", "tokenProgram"],
+      "properties": {
+        "symbol": { "type": "string", "minLength": 1 },
+        "mint": { "$ref": "#/$defs/solanaAddress" },
+        "decimals": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "tokenProgram": { "$ref": "#/$defs/solanaAddress" }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "listingIdBytes",
+        "titleUtf8Bytes",
+        "descriptionUtf8Bytes",
+        "participantMessageUtf8Bytes",
+        "detailsUrlUtf8Bytes",
+        "acceptCapacity"
+      ],
+      "properties": {
+        "listingIdBytes": { "type": "integer", "minimum": 1 },
+        "titleUtf8Bytes": { "type": "integer", "minimum": 1 },
+        "descriptionUtf8Bytes": { "type": "integer", "minimum": 1 },
+        "participantMessageUtf8Bytes": { "type": "integer", "minimum": 1 },
+        "detailsUrlUtf8Bytes": { "type": "integer", "minimum": 1 },
+        "acceptCapacity": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "lastVerifiedAt": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "solanaAddress": {
+      "type": "string",
+      "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$"
+    }
+  }
+}

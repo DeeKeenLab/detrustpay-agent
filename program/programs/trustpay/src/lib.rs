@@ -10,7 +10,7 @@ pub mod state;
 pub use events::*;
 pub use handlers::*;
 
-declare_id!("3QE69X6FsKxaop5osBW1WL11cCTMMvDuXJLZ9s2TcCNy");
+declare_id!("3S3kY64L8a3torKLpqEzkQeqDX82wjKRFXDMvxq2KcnL");
 
 #[program]
 pub mod detrustpay {
@@ -20,6 +20,7 @@ pub mod detrustpay {
         id: [u8; 16],
         title: String,
         description: String,
+        category: u8,
         ephemeral_pubkey: Pubkey,
         is_payer_listing: bool,
         payment_amount: u64,
@@ -36,6 +37,7 @@ pub mod detrustpay {
             id,
             title,
             description,
+            category,
             ephemeral_pubkey,
             is_payer_listing,
             payment_amount,
@@ -56,7 +58,6 @@ pub mod detrustpay {
         is_encrypted: Option<bool>,
         ephemeral_pubkey: Pubkey,
         nonce: Option<[u8; 12]>,
-        category: u8,
         details_url: String,
     ) -> Result<()> {
         process_accept_listing_token(
@@ -66,13 +67,20 @@ pub mod detrustpay {
             is_encrypted,
             ephemeral_pubkey,
             nonce,
-            category,
             details_url,
         )
     }
 
-    pub fn close_listing_token(ctx: Context<CloseListingToken>) -> Result<()> {
-        process_close_listing_token(ctx)
+    pub fn deactivate_listing(ctx: Context<DeactivateListing>) -> Result<()> {
+        process_deactivate_listing(ctx)
+    }
+
+    pub fn close_listing_vault(ctx: Context<CloseListingVault>) -> Result<()> {
+        process_close_listing_vault(ctx)
+    }
+
+    pub fn close_listing(ctx: Context<CloseListing>) -> Result<()> {
+        process_close_listing(ctx)
     }
 
     pub fn adjust_listing_capacity_token(
@@ -93,8 +101,12 @@ pub mod detrustpay {
         process_payer_confirm_token_order(ctx, id)
     }
 
-    pub fn close_token_order(ctx: Context<CloseTokenOrder>) -> Result<()> {
-        process_close_token_order(ctx)
+    pub fn close_order_vault(ctx: Context<CloseOrderVault>) -> Result<()> {
+        process_close_order_vault(ctx)
+    }
+
+    pub fn close_my_order_copy(ctx: Context<CloseMyOrderCopy>) -> Result<()> {
+        process_close_my_order_copy(ctx)
     }
 
     pub fn payer_make_proposal_order(
@@ -201,10 +213,6 @@ pub mod detrustpay {
         )
     }
 
-    pub fn migrate_config_v2(ctx: Context<MigrateConfigV2>) -> Result<()> {
-        process_migrate_config_v2(ctx)
-    }
-
     pub fn update_enable_adjustable_payment(
         ctx: Context<UpdateConfigByManageAuthority>,
         enabled: bool,
@@ -240,9 +248,7 @@ pub mod detrustpay {
         process_update_program_paused(ctx, paused)
     }
 
-    pub fn update_fee_vault_account(
-        ctx: Context<UpdateFeeVaultAccountByManageAuthority>,
-    ) -> Result<()> {
-        process_update_fee_vault_account(ctx)
+    pub fn withdraw_protocol_fees(ctx: Context<WithdrawProtocolFees>, amount: u64) -> Result<()> {
+        process_withdraw_protocol_fees(ctx, amount)
     }
 }

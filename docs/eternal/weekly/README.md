@@ -16,3 +16,10 @@ eternal-week-2
 eternal-week-3
 eternal-week-4
 ```
+
+## Current sprint
+
+- [Week 1 submitted update](week-1.md)
+- [Week 1 submitted video script](week-1-video-script.md)
+- [Week 2 update draft](week-2.md)
+- [Week 2 one-minute video script](week-2-video-script.md)

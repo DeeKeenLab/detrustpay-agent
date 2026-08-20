@@ -4,10 +4,10 @@ use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
 
-use crate::constants::SEED_CONFIG_ACCOUNT;
+use crate::constants::{SEED_CONFIG_ACCOUNT, SEED_PROTOCOL_FEE_VAULT_ACCOUNT};
 use crate::error::CustomError;
 use crate::events::DirectTokenPaid;
-use crate::state::{require_fee_vault_account, require_program_active, Config};
+use crate::state::{require_program_active, Config};
 
 pub fn process_direct_pay_token(
     ctx: Context<DirectPayToken>,
@@ -16,7 +16,6 @@ pub fn process_direct_pay_token(
 ) -> Result<()> {
     let config = &ctx.accounts.config_account;
     require_program_active(config)?;
-    require_fee_vault_account(config, &ctx.accounts.fee_vault_account.to_account_info())?;
 
     require!(amount > 0, CustomError::InvalidPaymentAmount);
     require_keys_eq!(
@@ -51,7 +50,7 @@ pub fn process_direct_pay_token(
                 TransferChecked {
                     from: ctx.accounts.payer_token_account.to_account_info(),
                     mint: ctx.accounts.mint_account.to_account_info(),
-                    to: ctx.accounts.vault_token_account.to_account_info(),
+                    to: ctx.accounts.protocol_fee_vault.to_account_info(),
                     authority: ctx.accounts.payer.to_account_info(),
                 },
             ),
@@ -108,17 +107,16 @@ pub struct DirectPayToken<'info> {
     )]
     pub config_account: Account<'info, Config>,
 
-    /// CHECK: Account is validated against config in instruction logic.
-    pub fee_vault_account: UncheckedAccount<'info>,
-
     #[account(
         init_if_needed,
         payer = payer,
-        associated_token::mint = mint_account,
-        associated_token::authority = fee_vault_account,
-        associated_token::token_program = token_program,
+        seeds = [SEED_PROTOCOL_FEE_VAULT_ACCOUNT, mint_account.key().as_ref()],
+        bump,
+        token::mint = mint_account,
+        token::authority = config_account,
+        token::token_program = token_program,
     )]
-    pub vault_token_account: InterfaceAccount<'info, TokenAccount>,
+    pub protocol_fee_vault: InterfaceAccount<'info, TokenAccount>,
 
     pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,

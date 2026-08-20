@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_lang::system_program::{transfer, Transfer};
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
@@ -8,7 +9,7 @@ use crate::constants::{
     SEED_CONFIG_ACCOUNT, SEED_LISTING_ACCOUNT, SEED_LISTING_TOKEN_VAULT_ACCOUNT,
 };
 use crate::error::CustomError;
-use crate::state::{require_program_active, Config, Listing};
+use crate::state::{require_program_active, Config, Listing, PartyOrder};
 use crate::ListingCreated;
 
 use super::super::utils::{creator_slot_amount, validate_setup_flags, validate_uuid_bytes};
@@ -18,6 +19,7 @@ pub fn process_create_listing_token(
     id: [u8; 16],
     title: String,
     description: String,
+    category: u8,
     ephemeral_pubkey: Pubkey,
     is_payer_listing: bool,
     payment_amount: u64,
@@ -87,32 +89,57 @@ pub fn process_create_listing_token(
         (counterparty_key, ctx.accounts.creator.key())
     };
 
+    let order_copy_rent =
+        Rent::get()?.minimum_balance(PartyOrder::INIT_SPACE + PartyOrder::DISCRIMINATOR.len());
+    let creator_order_rent_reserve = order_copy_rent
+        .checked_mul(accept_capacity)
+        .ok_or(CustomError::AmountOverflow)?;
+
     *ctx.accounts.listing = Listing {
+        creator: ctx.accounts.creator.key(),
+        counterparty: counterparty_key,
+        mint_account: ctx.accounts.mint_account.key(),
+        is_active: true,
+        is_payer_listing,
+        category,
+        accept_capacity,
+        used_capacity: 0,
+        active_orders: 0,
+        next_order_index: 1,
+        revision: 1,
         id,
         title,
         description,
-        creator: ctx.accounts.creator.key(),
         creator_ephemeral_pubkey: ephemeral_pubkey,
-        is_payer_listing,
-        counterparty: counterparty_key,
-        mint_account: ctx.accounts.mint_account.key(),
         mint_decimals: ctx.accounts.mint_account.decimals,
         creator_token_account: ctx.accounts.creator_token_account.key(),
         payment_amount,
         payer_deposit_amount,
         payee_deposit_amount,
-        accept_capacity,
-        used_capacity: 0,
-        active_orders: 0,
-        next_order_index: 1,
         is_adjustable_payment,
         is_custom_deposit,
+        dispute_deterrent_enabled: config.enable_dispute_deterrent,
         listing_token_vault_account: ctx.accounts.listing_token_vault_account.key(),
+        creator_order_rent_reserve,
+        listing_vault_closed: false,
         bump: ctx.bumps.listing,
         bump_listing_token_vault: ctx.bumps.listing_token_vault_account,
         date_created: timestamp,
         expiration,
     };
+
+    if creator_order_rent_reserve > 0 {
+        transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.creator.to_account_info(),
+                    to: ctx.accounts.listing.to_account_info(),
+                },
+            ),
+            creator_order_rent_reserve,
+        )?;
+    }
 
     if total_amount > 0 {
         transfer_checked(

@@ -3,6 +3,10 @@
 This document describes what the DeTrustPay Solana program does at a user and
 integrator level. It is not a license grant and is not a security audit.
 
+This document describes the breaking version 2 source. Version 2 requires a
+fresh program deployment and Config PDA; it is not an upgrade path for funded
+version 1 accounts.
+
 ## Purpose
 
 DeTrustPay is a structured settlement protocol for promise-based transactions.
@@ -23,7 +27,7 @@ consequences. A user can publish reusable terms, another user can accept those
 terms into a specific order, and the program holds both sides' locked token
 amounts in PDA vaults until the order reaches a recognized settlement outcome.
 
-The deployed program supports SPL-compatible token accounts through Anchor's
+The version 2 source supports SPL-compatible token accounts through Anchor's
 token interface. SOL-denominated flows are represented through wrapped SOL token
 accounts.
 
@@ -32,7 +36,8 @@ accounts.
 - A `Listing` is a reusable Structured Promise template: it defines the payment
   amount, payer and payee deposits, accepted counterparty rules, capacity, and
   optional expiration.
-- An `Order` is one accepted Structured Promise instance created from a listing.
+- A `PartyOrder` is one participant-owned mirror of an accepted Structured
+  Promise. Every accepted order has a Buyer copy and a Seller copy.
 - MEE is implemented by locking the payer side's payment/deposit exposure and
   the payee side's deposit exposure in program-derived token vaults.
 - eDDE is implemented through recognized on-chain actions: accept, confirm,
@@ -63,10 +68,20 @@ actions.
 The singleton `Config` account stores protocol settings:
 
 - `manage_authority`: authority allowed to update program configuration.
-- `fee_vault_account`: token account that receives protocol fees.
 - `enable_adjustable_payment`: enables proposal-based payment adjustment.
 - `enable_custom_deposit`: enables custom payer/payee deposit amounts.
-- `enable_dispute_deterrent`: enables proposal-related deterrent fee behavior.
+- `enable_dispute_deterrent`: selects proposal-related deterrent behavior for
+  newly created listings.
+- `paused` and `paused_at_slot`: stop new exposure while preserving existing
+  order settlement paths.
+
+The configuration has no legacy version field or migration path. This account
+layout belongs to a new, intentionally incompatible program deployment.
+
+Protocol fees are held in one deterministic token-vault PDA per mint, derived
+from `protocol_fee_vault` and the mint address. The Config PDA is the token
+authority. The manage authority may withdraw accumulated fees but cannot
+change the vault used by a funded order.
 
 ### Listing
 
@@ -85,27 +100,45 @@ A `Listing` stores reusable Structured Promise terms:
 - `used_capacity`: consumed capacity.
 - `active_orders`: accepted orders not yet settled or cancelled.
 - `next_order_index`: monotonic index used to derive order PDAs.
+- `revision`: monotonic listing state revision.
+- `category`: fixed-width marketplace category used by RPC filters.
 - `listing_token_vault_account`: PDA token vault holding the creator side's
   locked amount for future accepts.
+- `creator_order_rent_reserve`: creator-funded SOL reserved for the creator's
+  future order copies.
+- `listing_vault_closed`: records explicit listing-vault cleanup.
 - `expiration`: optional timestamp after which the listing cannot be accepted.
+- `dispute_deterrent_enabled`: immutable snapshot of the global setting when
+  the listing is created.
 
-### Order
+### PartyOrder
 
-An `Order` is created when a counterparty accepts a listing:
+Acceptance creates two complete `PartyOrder` accounts for the same order:
 
-- `id`: generated order identifier.
-- `parent_listing`: listing PDA that created the order.
-- `payer` and `payee`: final order participants.
-- `payment_amount`, `payer_deposit_amount`, `payee_deposit_amount`: copied terms.
-- `payer_token_account` and `payee_token_account`: settlement destinations.
-- `order_token_vault_account`: PDA token vault that holds locked order funds.
-- `closed`, `closed_date`, `closed_reason`: order close state.
-- `version`: incremented when proposal state changes.
-- `additional_fee_payer_bps` and `additional_fee_payee_bps`: proposal deterrent
-  fee state.
-- payer/payee message fields: optional short plaintext or encrypted metadata.
-- proposal fields: latest proposed amount, proposal date, and optional expiry.
-- `category` and `details_url`: frontend/indexer metadata.
+- Buyer copy: authority is the payer.
+- Seller copy: authority is the payee.
+
+The fixed prefix stores `authority` at raw account-data offset 8,
+`counterparty`, `role`, a digest of the complete shared order payload, and the
+copy PDA bump. The shared payload stores the order ID, listing identity,
+participants, accepted economic and dispute rules, mint and token destinations,
+order vault, proposal/message state, revision, dates, terminal state, and
+explicit vault-cleanup state.
+
+Every active lifecycle instruction validates both roles, reciprocal authorities,
+identical payloads, and recomputed digests. It applies the transition to the
+Buyer copy and synchronizes the complete result and digest to the Seller copy in
+the same Solana transaction.
+
+A wallet discovers its retained copies with one server-side filtered
+`getProgramAccounts` request using the `PartyOrder` discriminator and a memcmp at
+authority offset 8. It does not download every program account and does not need
+a DeTrustPay backend index. Local IndexedDB is only a restorable cache of this
+chain state.
+
+The two state accounts are not token-vault authorities. The vault is controlled
+by a separate accountless `OrderAuthority` PDA, so either participant can later
+close their own state copy without affecting token authority or the other copy.
 
 ## Core Flows
 
@@ -114,11 +147,11 @@ An `Order` is created when a counterparty accepts a listing:
 `initialize_config` creates the program configuration PDA and sets:
 
 - manage authority
-- fee vault token account
 - feature flags for adjustable payments, custom deposits, and dispute deterrent
 
-The manage authority can later update those fields through the update
-instructions.
+The manage authority can later update those feature flags for new listings and
+can pause or resume new exposure. Existing listing and order terms remain
+snapshotted in their accounts where the setting can affect settlement.
 
 ### 2. Create A Listing
 
@@ -141,10 +174,14 @@ into the listing vault.
 - payer listing: payment amount plus payer deposit, multiplied by capacity
 - payee listing: payee deposit, multiplied by capacity
 
+The creator also pre-funds one future `PartyOrder` rent reserve for each unused
+capacity slot. This reserve remains the creator's SOL in the program-owned
+Listing account until acceptance or explicit capacity/listing cleanup.
+
 ### 3. Accept A Listing
 
-`accept_listing_token` creates one active Structured Promise `Order` from a
-listing.
+`accept_listing_token` creates one active Structured Promise represented by two
+mirrored `PartyOrder` PDAs.
 
 The program validates:
 
@@ -156,8 +193,16 @@ The program validates:
 
 The program creates:
 
-- an `Order` PDA
+- a Buyer `PartyOrder` PDA
+- a Seller `PartyOrder` PDA
+- an accountless order-authority PDA
 - an order token vault PDA
+
+The online accepter fronts both state-account initializations. In the same
+atomic instruction, the listing reimburses exactly the creator-side copy rent
+from the creator-funded reserve. The accepter's final SOL cost is therefore
+their own copy plus the shared token vault. The accepter is recorded as the
+vault-rent refund recipient.
 
 It transfers the creator side's locked amount from the listing vault into the
 order vault, then transfers the counterparty side's required amount from the
@@ -175,8 +220,8 @@ On confirmation, the program:
 - calculates protocol fee shares
 - transfers payer refund/deposit remainder to the payer
 - transfers payment and payee refund/deposit remainder to the payee
-- transfers protocol fees to the configured fee vault token account
-- closes the order vault
+- transfers protocol fees to the deterministic per-mint protocol fee vault
+- writes the same terminal state to both retained order copies
 - decreases the parent listing's active order count
 - emits an `OrderConfirmed` event
 
@@ -188,14 +233,32 @@ proposal deterrent fees may apply if enabled and proposal actions occurred.
 `payee_cancel_token_order` handles the payee cancellation/refusal path.
 
 On cancellation, the program calculates cancellation fees, routes fees to the
-configured fee vault, refunds the remaining locked amounts, closes the order
-vault, and updates the parent listing counters so reusable listing capacity can
-be made available again where applicable.
+deterministic per-mint protocol fee vault, refunds the remaining locked amounts,
+writes terminal state to both copies, and updates the parent listing counters.
+It does not automatically close the order vault or either participant copy.
 
-### 6. Proposal Flow
+### 6. Explicit Cleanup
 
-If adjustable payments are enabled, either side can propose a different payment
-amount instead of forcing a binary confirm/cancel outcome:
+Settlement never reclaims rent automatically:
+
+- `close_order_vault` requires both matching terminal copies and an empty order
+  token vault. Either participant may invoke it, but vault rent always returns
+  to the recorded accepter who funded it. Both copies are updated with
+  `vault_closed = true`.
+- `close_my_order_copy` requires only one terminal, vault-closed copy and its
+  stored authority signer. It closes only that participant's copy and returns
+  only that copy's SOL rent to that participant.
+- `deactivate_listing`, `close_listing_vault`, and `close_listing` are explicit
+  creator actions. Listing cleanup requires zero active orders; closing the
+  Listing returns unused creator-copy reserve and listing rent to the creator.
+
+The protocol, management authority, and counterparty cannot close a user's
+retained order copy.
+
+### 7. Proposal Flow
+
+If adjustable payments were enabled for the order, either side can propose a
+different payment amount instead of forcing a binary confirm/cancel outcome:
 
 - `payer_make_proposal_order`
 - `payee_make_proposal_order`
@@ -209,9 +272,10 @@ The order `version` protects against accepting stale proposal state. Proposal
 expiry can be set. When dispute deterrent is enabled, proposal actions can add
 basis-point fees to the relevant side, capped by program constants. This is the
 program's current eDDE dispute-convergence path: participant proposals become
-recognized state changes with settlement consequences.
+recognized state changes with settlement consequences. The order uses the
+deterrent setting snapshotted at listing creation, not the current Config value.
 
-### 7. Messages
+### 8. Messages
 
 Participants can attach or update short message metadata:
 
@@ -222,17 +286,26 @@ Messages can be plaintext or encrypted off-chain. The program stores only the
 message string, encryption flag, ephemeral public key, nonce, and timestamp. It
 does not perform message encryption or decryption.
 
-### 8. Direct Pay
+### 9. Direct Pay
 
 `direct_pay_token` supports a direct token payment path. It transfers a token
 amount from payer to payee and routes any configured fee behavior through the
-program's fee vault path.
+program's deterministic per-mint fee vault.
+
+### 10. Withdraw Protocol Fees
+
+`withdraw_protocol_fees` allows the current manage authority to transfer an
+amount accumulated in a per-mint protocol fee vault to a token account for the
+same mint. This changes treasury custody only after fees have accrued. It does
+not change any listing, order, fee formula, or future settlement destination.
 
 ## Events
 
 The program emits Anchor events for off-chain consumers:
 
 - `ListingCreated`
+- `ListingDeactivated`
+- `ListingVaultClosed`
 - `ListingClosed`
 - `ListingCapacityAdjusted`
 - `OrderCreated`
@@ -246,6 +319,8 @@ The program emits Anchor events for off-chain consumers:
 - `DirectTokenPaid`
 - `ConfigInitialized`
 - `ConfigUpdated`
+- `ProgramPauseUpdated`
+- `ProtocolFeesWithdrawn`
 
 Indexers and frontends should use these events together with on-chain account
 state to build user-facing order and listing views.

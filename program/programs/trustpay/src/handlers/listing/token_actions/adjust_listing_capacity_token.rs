@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_lang::system_program::{transfer, Transfer};
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token_interface::{
     transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked,
@@ -6,7 +7,7 @@ use anchor_spl::token_interface::{
 
 use crate::constants::{SEED_LISTING_ACCOUNT, SEED_LISTING_TOKEN_VAULT_ACCOUNT};
 use crate::error::CustomError;
-use crate::state::Listing;
+use crate::state::{Listing, PartyOrder};
 use crate::ListingCapacityAdjusted;
 
 use super::super::utils::creator_slot_amount;
@@ -21,6 +22,11 @@ pub fn process_adjust_listing_capacity_token(
     require!(
         setup.creator == ctx.accounts.creator.key(),
         CustomError::SetupOnlyCreator
+    );
+    require!(setup.is_active, CustomError::PaymentCloseNotReady);
+    require!(
+        !setup.listing_vault_closed,
+        CustomError::OrderVaultAlreadyClosed
     );
     require!(
         setup.mint_account == ctx.accounts.mint_account.key(),
@@ -64,6 +70,12 @@ pub fn process_adjust_listing_capacity_token(
         .ok_or(CustomError::AmountOverflow)?;
     let vault_balance = ctx.accounts.listing_token_vault_account.amount;
 
+    let order_copy_rent =
+        Rent::get()?.minimum_balance(PartyOrder::INIT_SPACE + PartyOrder::DISCRIMINATOR.len());
+    let required_rent_reserve = order_copy_rent
+        .checked_mul(remaining_capacity)
+        .ok_or(CustomError::AmountOverflow)?;
+
     let signer_seeds: &[&[&[u8]]] = &[&[SEED_LISTING_ACCOUNT, setup.id.as_ref(), &[setup.bump]]];
 
     let mut deposit_amount = 0;
@@ -90,7 +102,37 @@ pub fn process_adjust_listing_capacity_token(
             )?;
         }
 
+        let rent_refund = setup
+            .creator_order_rent_reserve
+            .saturating_sub(required_rent_reserve);
+        if rent_refund > 0 {
+            let setup_info = setup.to_account_info();
+            let creator_info = ctx.accounts.creator.to_account_info();
+            let setup_lamports = setup_info.lamports();
+            let creator_lamports = creator_info.lamports();
+            let new_setup_lamports = setup_lamports
+                .checked_sub(rent_refund)
+                .ok_or(CustomError::AmountUnderflow)?;
+            let new_creator_lamports = creator_lamports
+                .checked_add(rent_refund)
+                .ok_or(CustomError::AmountOverflow)?;
+            let mut setup_lamports_ref = setup_info.try_borrow_mut_lamports()?;
+            let mut creator_lamports_ref = creator_info.try_borrow_mut_lamports()?;
+            **setup_lamports_ref = new_setup_lamports;
+            **creator_lamports_ref = new_creator_lamports;
+            drop(creator_lamports_ref);
+            drop(setup_lamports_ref);
+            setup.creator_order_rent_reserve = setup
+                .creator_order_rent_reserve
+                .checked_sub(rent_refund)
+                .ok_or(CustomError::AmountUnderflow)?;
+        }
+
         setup.accept_capacity = new_accept_capacity;
+        setup.revision = setup
+            .revision
+            .checked_add(1)
+            .ok_or(CustomError::AmountOverflow)?;
 
         emit!(ListingCapacityAdjusted {
             setup: setup.key(),
@@ -128,7 +170,28 @@ pub fn process_adjust_listing_capacity_token(
         }
     }
 
+    if setup.creator_order_rent_reserve < required_rent_reserve {
+        let rent_deposit = required_rent_reserve
+            .checked_sub(setup.creator_order_rent_reserve)
+            .ok_or(CustomError::AmountUnderflow)?;
+        transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.creator.to_account_info(),
+                    to: setup.to_account_info(),
+                },
+            ),
+            rent_deposit,
+        )?;
+        setup.creator_order_rent_reserve = required_rent_reserve;
+    }
+
     setup.accept_capacity = new_accept_capacity;
+    setup.revision = setup
+        .revision
+        .checked_add(1)
+        .ok_or(CustomError::AmountOverflow)?;
 
     emit!(ListingCapacityAdjusted {
         setup: setup.key(),

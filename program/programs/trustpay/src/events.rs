@@ -17,7 +17,8 @@ pub struct DirectTokenPaid {
 pub struct OrderCreated {
     pub creator: Pubkey,
     pub id: String,
-    pub payment: Pubkey,
+    pub buyer_order: Pubkey,
+    pub seller_order: Pubkey,
     pub payer: Pubkey,
     pub payee: Pubkey,
     pub vault: Pubkey,
@@ -153,6 +154,22 @@ pub struct ListingClosed {
 }
 
 #[event]
+pub struct ListingDeactivated {
+    pub listing: Pubkey,
+    pub creator: Pubkey,
+    pub revision: u64,
+}
+
+#[event]
+pub struct ListingVaultClosed {
+    pub listing: Pubkey,
+    pub creator: Pubkey,
+    pub vault: Pubkey,
+    pub remaining_amount: u64,
+    pub revision: u64,
+}
+
+#[event]
 pub struct ListingCapacityAdjusted {
     pub setup: Pubkey,
     pub creator: Pubkey,
@@ -171,24 +188,20 @@ pub struct ConfigInitialized {
     pub config: Pubkey,
     pub authority: Pubkey,
     pub manage_authority: Pubkey,
-    pub fee_vault_account: Pubkey,
     pub enable_adjustable_payment: bool,
     pub enable_custom_deposit: bool,
     pub enable_dispute_deterrent: bool,
     pub paused: bool,
-    pub version: u8,
     pub slot: u64,
 }
 
 #[event]
-pub struct ConfigMigrated {
-    pub config: Pubkey,
+pub struct ProtocolFeesWithdrawn {
     pub authority: Pubkey,
-    pub manage_authority: Pubkey,
-    pub fee_vault_account: Pubkey,
-    pub previous_version: u8,
-    pub version: u8,
-    pub slot: u64,
+    pub mint: Pubkey,
+    pub protocol_fee_vault: Pubkey,
+    pub destination_token_account: Pubkey,
+    pub amount: u64,
 }
 
 #[event]

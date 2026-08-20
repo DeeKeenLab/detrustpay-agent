@@ -2,8 +2,6 @@ use anchor_lang::prelude::*;
 
 #[error_code]
 pub enum CustomError {
-    #[msg("Invalid config account")]
-    InvalidConfigAccount,
     #[msg("Amount calculation overflowed")]
     AmountOverflow,
     #[msg("Amount calculation underflowed")]
@@ -32,6 +30,8 @@ pub enum CustomError {
     OutdatedPaymentVersion,
     #[msg("Order amount must be greater than zero")]
     InvalidPaymentAmount,
+    #[msg("Withdrawal amount must be greater than zero")]
+    InvalidWithdrawalAmount,
     #[msg("Recipient does not match the provided pubkey")]
     RecipientMismatch,
     #[msg("Adjustable payments are disabled")]
@@ -92,4 +92,24 @@ pub enum CustomError {
     MissingEncryptionPubkey,
     #[msg("Create listing, accept listing, and direct payment are paused")]
     ProgramPaused,
+    #[msg("Buyer and seller order copies do not describe the same order")]
+    OrderPairMismatch,
+    #[msg("Order copy role does not match its PDA role")]
+    OrderRoleMismatch,
+    #[msg("Order copy authority does not match its participant")]
+    OrderAuthorityMismatch,
+    #[msg("Order copy state digest is invalid")]
+    OrderDigestMismatch,
+    #[msg("Order state could not be serialized")]
+    OrderStateSerializationFailed,
+    #[msg("Listing creator order-copy rent reserve is insufficient")]
+    ListingRentReserveInsufficient,
+    #[msg("Only an order participant can perform this action")]
+    OrderParticipantOnly,
+    #[msg("Order token vault must be closed first")]
+    OrderVaultNotClosed,
+    #[msg("Order token vault is already closed")]
+    OrderVaultAlreadyClosed,
+    #[msg("Order token vault must be empty before it can be closed")]
+    OrderVaultNotEmpty,
 }

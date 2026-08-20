@@ -1,0 +1,23 @@
+{
+  "$schema": "./network.schema.json",
+  "schemaVersion": 1,
+  "cluster": "devnet",
+  "rpcUrl": "https://api.devnet.solana.com",
+  "programId": "3S3kY64L8a3torKLpqEzkQeqDX82wjKRFXDMvxq2KcnL",
+  "configAccount": "CYrLYtpgk5UNuq3C7pjrYd6XuetTujL3Pu8JSk5ozSd8",
+  "settlementToken": {
+    "symbol": "USDC",
+    "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+    "decimals": 6,
+    "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+  },
+  "limits": {
+    "listingIdBytes": 16,
+    "titleUtf8Bytes": 64,
+    "descriptionUtf8Bytes": 256,
+    "participantMessageUtf8Bytes": 128,
+    "detailsUrlUtf8Bytes": 128,
+    "acceptCapacity": 1
+  },
+  "lastVerifiedAt": "2026-08-14T01:26:00Z"
+}

@@ -8,22 +8,55 @@ use anchor_spl::token_interface::{
 use crate::constants::{SEED_LISTING_ACCOUNT, SEED_LISTING_TOKEN_VAULT_ACCOUNT};
 use crate::error::CustomError;
 use crate::state::Listing;
-use crate::ListingClosed;
+use crate::{ListingClosed, ListingDeactivated, ListingVaultClosed};
 
-pub fn process_close_listing_token(ctx: Context<CloseListingToken>) -> Result<()> {
-    let setup = &ctx.accounts.listing;
-    require!(
-        setup.creator == ctx.accounts.creator.key(),
+pub fn process_deactivate_listing(ctx: Context<DeactivateListing>) -> Result<()> {
+    let listing = &mut ctx.accounts.listing;
+    require_keys_eq!(
+        listing.creator,
+        ctx.accounts.creator.key(),
         CustomError::SetupOnlyCreator
     );
-    require!(setup.active_orders == 0, CustomError::SetupNotEmpty);
+    listing.is_active = false;
+    listing.revision = listing
+        .revision
+        .checked_add(1)
+        .ok_or(CustomError::AmountOverflow)?;
+    emit!(ListingDeactivated {
+        listing: listing.key(),
+        creator: ctx.accounts.creator.key(),
+        revision: listing.revision,
+    });
+    Ok(())
+}
+
+pub fn process_close_listing_vault(ctx: Context<CloseListingVault>) -> Result<()> {
+    let listing = &mut ctx.accounts.listing;
+    require_keys_eq!(
+        listing.creator,
+        ctx.accounts.creator.key(),
+        CustomError::SetupOnlyCreator
+    );
+    require!(listing.active_orders == 0, CustomError::SetupNotEmpty);
     require!(
-        setup.mint_account == ctx.accounts.mint_account.key(),
+        !listing.listing_vault_closed,
+        CustomError::OrderVaultAlreadyClosed
+    );
+    require_keys_eq!(
+        listing.mint_account,
+        ctx.accounts.mint_account.key(),
         CustomError::SetupMintMismatch
     );
+    require_keys_eq!(
+        listing.listing_token_vault_account,
+        ctx.accounts.listing_token_vault_account.key(),
+        CustomError::SetupTokenVaultMismatch
+    );
 
+    listing.is_active = false;
     let remaining_amount = ctx.accounts.listing_token_vault_account.amount;
-    let signer_seeds: &[&[&[u8]]] = &[&[SEED_LISTING_ACCOUNT, setup.id.as_ref(), &[setup.bump]]];
+    let signer_seeds: &[&[&[u8]]] =
+        &[&[SEED_LISTING_ACCOUNT, listing.id.as_ref(), &[listing.bump]]];
 
     if remaining_amount > 0 {
         transfer_checked(
@@ -33,7 +66,7 @@ pub fn process_close_listing_token(ctx: Context<CloseListingToken>) -> Result<()
                     from: ctx.accounts.listing_token_vault_account.to_account_info(),
                     mint: ctx.accounts.mint_account.to_account_info(),
                     to: ctx.accounts.creator_token_account.to_account_info(),
-                    authority: ctx.accounts.listing.to_account_info(),
+                    authority: listing.to_account_info(),
                 },
                 signer_seeds,
             ),
@@ -47,36 +80,79 @@ pub fn process_close_listing_token(ctx: Context<CloseListingToken>) -> Result<()
         CloseAccount {
             account: ctx.accounts.listing_token_vault_account.to_account_info(),
             destination: ctx.accounts.creator.to_account_info(),
-            authority: ctx.accounts.listing.to_account_info(),
+            authority: listing.to_account_info(),
         },
         signer_seeds,
     ))?;
 
-    let (payer_key, payee_key) = if setup.is_payer_listing {
-        (setup.creator, setup.counterparty)
-    } else {
-        (setup.counterparty, setup.creator)
-    };
-    emit!(ListingClosed {
-        setup: setup.key(),
+    listing.listing_vault_closed = true;
+    listing.revision = listing
+        .revision
+        .checked_add(1)
+        .ok_or(CustomError::AmountOverflow)?;
+    emit!(ListingVaultClosed {
+        listing: listing.key(),
         creator: ctx.accounts.creator.key(),
-        payer: payer_key,
-        payee: payee_key,
-        mint: ctx.accounts.mint_account.key(),
-        mint_decimals: ctx.accounts.mint_account.decimals,
+        vault: ctx.accounts.listing_token_vault_account.key(),
         remaining_amount,
+        revision: listing.revision,
+    });
+    Ok(())
+}
+
+pub fn process_close_listing(ctx: Context<CloseListing>) -> Result<()> {
+    let listing = &ctx.accounts.listing;
+    require_keys_eq!(
+        listing.creator,
+        ctx.accounts.creator.key(),
+        CustomError::SetupOnlyCreator
+    );
+    require!(!listing.is_active, CustomError::PaymentCloseNotReady);
+    require!(listing.active_orders == 0, CustomError::SetupNotEmpty);
+    require!(
+        listing.listing_vault_closed,
+        CustomError::OrderVaultNotClosed
+    );
+
+    emit!(ListingClosed {
+        setup: listing.key(),
+        creator: ctx.accounts.creator.key(),
+        payer: if listing.is_payer_listing {
+            listing.creator
+        } else {
+            listing.counterparty
+        },
+        payee: if listing.is_payer_listing {
+            listing.counterparty
+        } else {
+            listing.creator
+        },
+        mint: listing.mint_account,
+        mint_decimals: listing.mint_decimals,
+        remaining_amount: listing.creator_order_rent_reserve,
     });
     Ok(())
 }
 
 #[derive(Accounts)]
-pub struct CloseListingToken<'info> {
+pub struct DeactivateListing<'info> {
+    pub creator: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [SEED_LISTING_ACCOUNT, listing.id.as_ref()],
+        bump = listing.bump,
+    )]
+    pub listing: Account<'info, Listing>,
+}
+
+#[derive(Accounts)]
+pub struct CloseListingVault<'info> {
     #[account(mut)]
     pub creator: Signer<'info>,
 
     #[account(
         mut,
-        close = creator,
         seeds = [SEED_LISTING_ACCOUNT, listing.id.as_ref()],
         bump = listing.bump,
     )]
@@ -102,4 +178,18 @@ pub struct CloseListingToken<'info> {
     pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CloseListing<'info> {
+    #[account(mut)]
+    pub creator: Signer<'info>,
+
+    #[account(
+        mut,
+        close = creator,
+        seeds = [SEED_LISTING_ACCOUNT, listing.id.as_ref()],
+        bump = listing.bump,
+    )]
+    pub listing: Account<'info, Listing>,
 }

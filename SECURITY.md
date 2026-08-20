@@ -16,6 +16,23 @@ assets or production keys.
 - No component should describe the program as audited unless a published audit
   report exists.
 
+## Eternal transaction policy
+
+- V0 write operations must match `config/devnet.json`: cluster, program ID,
+  mint, token program, and decoded account relationships are fail-closed.
+- Token base units use unsigned decimal strings at storage boundaries and
+  `bigint` in TypeScript. Floating-point amounts are rejected.
+- A requester policy must cap payment plus deposit exposure. A provider policy
+  must cap its deposit exposure. SDK defaults may never silently raise a cap.
+- The SDK must validate and simulate the complete transaction before presenting
+  it to an external signer. The signer remains responsible for approval.
+- Task-manifest terms must match on-chain settlement terms. A mismatch is an
+  error, not a warning that an agent may override.
+- Delivery receipt pointers are public in v0 and must be content-addressed.
+  Sensitive artifact content must be encrypted before it is stored off-chain.
+- Listing acceptance expiry is enforced by the program. Delivery deadlines are
+  off-chain policy and must not be represented as automatic on-chain timeouts.
+
 ## Repository hygiene
 
 Never commit environment files, keypairs, wallet directories, Terraform

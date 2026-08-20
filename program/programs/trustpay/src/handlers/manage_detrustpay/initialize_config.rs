@@ -28,27 +28,23 @@ pub fn process_initialize_config(
 
     *ctx.accounts.config_account = Config {
         manage_authority,
-        fee_vault_account: ctx.accounts.fee_vault_account.key(),
         bump: ctx.bumps.config_account,
         enable_adjustable_payment,
         enable_custom_deposit,
         enable_dispute_deterrent,
         paused: false,
-        version: Config::VERSION,
         paused_at_slot: 0,
-        reserved: [0; 32],
+        reserved: [0; 64],
     };
 
     emit!(ConfigInitialized {
         config: ctx.accounts.config_account.key(),
         authority: ctx.accounts.authority.key(),
         manage_authority,
-        fee_vault_account: ctx.accounts.fee_vault_account.key(),
         enable_adjustable_payment,
         enable_custom_deposit,
         enable_dispute_deterrent,
         paused: false,
-        version: Config::VERSION,
         slot,
     });
 

@@ -66,6 +66,17 @@ pub fn resolve_proposal_penalty_bps(enable_dispute_deterrent: bool) -> Result<u6
     Ok(PROPOSAL_PENALTY_BPS)
 }
 
+pub fn resolve_order_proposal_penalty_bps(
+    is_adjustable_payment: bool,
+    dispute_deterrent_enabled: bool,
+) -> Result<u64> {
+    require!(
+        is_adjustable_payment,
+        CustomError::AdjustablePaymentDisabled
+    );
+    resolve_proposal_penalty_bps(dispute_deterrent_enabled)
+}
+
 pub fn add_proposal_penalty_bps(current_bps: u64, penalty_bps: u64) -> u64 {
     current_bps
         .saturating_add(penalty_bps)
@@ -150,6 +161,23 @@ mod tests {
     fn proposal_penalty_is_zero_when_deterrent_disabled() {
         let bps = resolve_proposal_penalty_bps(false).expect("disabled deterrent should resolve");
         assert_eq!(bps, 0);
+    }
+
+    #[test]
+    fn proposal_is_rejected_when_order_is_not_adjustable() {
+        let result = resolve_order_proposal_penalty_bps(false, true);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn order_uses_its_snapshotted_deterrent_setting() {
+        let disabled = resolve_order_proposal_penalty_bps(true, false)
+            .expect("adjustable order with deterrent disabled should be valid");
+        let enabled = resolve_order_proposal_penalty_bps(true, true)
+            .expect("adjustable order with deterrent enabled should be valid");
+
+        assert_eq!(disabled, 0);
+        assert_eq!(enabled, PROPOSAL_PENALTY_BPS);
     }
 
     #[test]
