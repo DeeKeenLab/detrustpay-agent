@@ -34,6 +34,8 @@ RPC endpoints.
 - Week 2 video: `TBD — add the public Loom or YouTube URL after recording`
 - Live devnet application: [detrustpay.com](https://detrustpay.com)
 - Public repository: [DeeKeenLab/detrustpay-agent](https://github.com/DeeKeenLab/detrustpay-agent)
+- Week 1 public checkpoint:
+  [`b1f9cfa`](https://github.com/DeeKeenLab/detrustpay-agent/commit/b1f9cfa4399f74b9f77fce0d0a73e4d70142923d)
 - Devnet program: [`3S3k...KcnL`](https://explorer.solana.com/address/3S3kY64L8a3torKLpqEzkQeqDX82wjKRFXDMvxq2KcnL?cluster=devnet)
 - Program deployment: [`2zU6...hU9V`](https://explorer.solana.com/tx/2zU61wsuJQnVgHnt8QZUgcoX4K5GXmXc69nVSpFPM1MgvFPjYD6oUiHhAcaDKGKp22G25tF2uicDyovfJYgQhU9V?cluster=devnet)
 - SDK tests: policy boundaries, UTF-8 limits, request coalescing, cache

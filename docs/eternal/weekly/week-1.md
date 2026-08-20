@@ -37,8 +37,8 @@ DeTrustPay devnet baseline is ready for SDK integration.
 - Recording script: [`week-1-video-script.md`](week-1-video-script.md)
 - Baseline commit: `c19392a` (`pre-eternal-2026-h2`)
 - Provenance commit: `cb556b5`
-- Day 0 and Week 1 artifact checkpoint: this document and the version 2 program
-  snapshot are published together on the competition branch.
+- Day 0 and Week 1 artifact checkpoint:
+  [`b1f9cfa`](https://github.com/DeeKeenLab/detrustpay-agent/commit/b1f9cfa4399f74b9f77fce0d0a73e4d70142923d)
 - Devnet program: `3S3kY64L8a3torKLpqEzkQeqDX82wjKRFXDMvxq2KcnL`
 - Initial deployment: `2zU61wsuJQnVgHnt8QZUgcoX4K5GXmXc69nVSpFPM1MgvFPjYD6oUiHhAcaDKGKp22G25tF2uicDyovfJYgQhU9V`
 - Executable hash: `85d76f2458feaeed38cd4e8c89bbf5b51f6f090c5db926b89b4602479937a24b`

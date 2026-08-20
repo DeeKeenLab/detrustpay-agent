@@ -13,6 +13,7 @@ protocol development and tests.
 - Canonical base commit: `f975216561ef29d388986bab81d685f689a3c854`
 - Canonical base subject: `repo: make clean-clone builds self-contained`
 - Canonical source state: uncommitted version 2 working-tree changes
+- Public competition snapshot: `b1f9cfa4399f74b9f77fce0d0a73e4d70142923d`
 - Program crate version: `2.0.0`
 - Program source-tree SHA-256: `c9d801669e4de37355b07e48ad9c656723e26c12a3b6c0d01f98751ce08fbb69`
 - Cargo lockfile SHA-256: `fbafcc7a1cbd19dd8f9c863357a3334c38e6132bf34285dd72e16931a651e40f`
